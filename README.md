@@ -1,2 +1,3 @@
-# threejs-voxel-solar-system
-Solar System voxel scene written using Three.js
+# Solar System voxel scene
+
+This repo contains code to generate Solar System voxel scene in the web browser, which was written using the Three.js framework.
