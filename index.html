@@ -2,25 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Voxel Earth & Moon + Stars – Three.js</title>
+  <title>High-Detail Voxel Solar System</title>
   <style>
     body { margin: 0; overflow: hidden; background: #000; }
     canvas { display: block; }
     #info {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      color: #88f;
-      font-family: Arial, Helvetica, sans-serif;
-      pointer-events: none;
-      user-select: none;
-      z-index: 10;
+      position: absolute; top: 10px; left: 10px;
+      color: #88f; font-family: Arial, sans-serif;
+      pointer-events: none; user-select: none; z-index: 10;
     }
   </style>
 </head>
 <body>
 
-<div id="info">Voxel Earth + Moon + Stars • drag to rotate • scroll to zoom</div>
+<div id="info">Voxel Solar System • Dynamic Earth • Gas Giant Moons • Scroll to Zoom</div>
 
 <script type="importmap">
 {
@@ -34,18 +29,17 @@
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
-// ────────────────────────────────────────────────────────────────
+// ─── Scene Setup ─────────────────────────────────────────────────
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x000814); // very dark blue-black
+scene.background = new THREE.Color(0x000205);
 
-const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 2000);
-camera.position.set(45, 28, 60);
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 1, 15000);
+camera.position.set(2800, 1500, 3200);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
@@ -54,242 +48,155 @@ document.body.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.dampingFactor = 0.04;
-controls.minDistance = 20;
-controls.maxDistance = 500; // allow zooming out to see more stars
+controls.maxDistance = 12000;
 
-// ─── Sun (Optimized with InstancedMesh) ──────────────────────────
-const sunGroup = new THREE.Group();
-scene.add(sunGroup);
-
-const sunRadius = 15;
-const sunPos = new THREE.Vector3(1500, 0, 100);
-
-// 1. Pre-calculate how many voxels we actually need
-let voxelCount = 0;
-for (let x = -sunRadius; x <= sunRadius; x++) {
-  for (let y = -sunRadius; y <= sunRadius; y++) {
-    for (let z = -sunRadius; z <= sunRadius; z++) {
-      if (Math.hypot(x, y, z) <= sunRadius) voxelCount++;
-    }
-  }
-}
-
-// 2. Create ONE InstancedMesh instead of thousands of individual Meshes
-const sunGeo = new THREE.BoxGeometry(1, 1, 1);
-const sunMat = new THREE.MeshStandardMaterial({
-  emissive: 0xffcc00,
-  emissiveIntensity: 2.0, // High intensity for bloom
-  flatShading: true
-});
-
-const instancedSun = new THREE.InstancedMesh(sunGeo, sunMat, voxelCount);
+const voxelGeo = new THREE.BoxGeometry(1, 1, 1);
 const dummy = new THREE.Object3D();
 const colorObj = new THREE.Color();
-let idx = 0;
 
-for (let x = -sunRadius; x <= sunRadius; x++) {
-  for (let y = -sunRadius; y <= sunRadius; y++) {
-    for (let z = -sunRadius; z <= sunRadius; z++) {
-      const dist = Math.hypot(x, y, z);
-      if (dist > sunRadius) continue;
-
-      // Set Position
-      dummy.position.set(x + 0.5, y + 0.5, z + 0.5);
-      dummy.updateMatrix();
-      instancedSun.setMatrixAt(idx, dummy.matrix);
-
-      // Set Color (Core vs Shell)
-      const isCore = dist < sunRadius * 0.8;
-      colorObj.setHex(isCore ? 0xffcc00 : 0xff9900);
-      instancedSun.setColorAt(idx, colorObj);
-
-      idx++;
-    }
-  }
-}
-
-sunGroup.add(instancedSun);
+// ─── Sun ──────────────────────────────────────────────────────────
+const sunPos = new THREE.Vector3(1500, 0, 100);
+const sunRadius = 45;
+const sunGroup = new THREE.Group();
 sunGroup.position.copy(sunPos);
+scene.add(sunGroup);
 
-// ─── Lights ───────────────────────────────────────────────────────
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const sunMat = new THREE.MeshStandardMaterial({ emissive: 0xffaa00, emissiveIntensity: 2.5, flatShading: true });
 
-const sun = new THREE.DirectionalLight(0xfff8e8, 1.8);
-//sun.position.set(100, 60, 80);
-sun.position.copy(sunPos);
-scene.add(sun);
+let sunVoxels = [];
+for (let x=-sunRadius; x<=sunRadius; x+=2) 
+    for (let y=-sunRadius; y<=sunRadius; y+=2) 
+        for (let z=-sunRadius; z<=sunRadius; z+=2) 
+            if (Math.hypot(x,y,z) <= sunRadius) sunVoxels.push([x,y,z]);
 
-const moonLight = new THREE.DirectionalLight(0xaaccff, 0.4);
-moonLight.position.set(-40, 0, -40);
-scene.add(moonLight);
+const sunInst = new THREE.InstancedMesh(voxelGeo, sunMat, sunVoxels.length);
+sunVoxels.forEach((v, i) => { dummy.position.set(v[0], v[1], v[2]); dummy.updateMatrix(); sunInst.setMatrixAt(i, dummy.matrix); });
+sunGroup.add(sunInst);
 
-// ─── Voxel helper ──────────────────────────────────────────────────
-function createVoxel(x, y, z, color, scale = 1) {
-  const geo = new THREE.BoxGeometry(scale, scale, scale);
-  const mat = new THREE.MeshStandardMaterial({
-    color,
-    emissive: color,          // slight glow for stars
-    //emissiveIntensity: 0.3,
-    emissiveIntensity: 0.05,
-    roughness: 0.9,
-    metalness: 0.0,
-    flatShading: true
-  });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(x, y, z);
-  return mesh;
-}
+const sunLight = new THREE.PointLight(0xffffff, 15, 10000, 0.6);
+sunLight.position.copy(sunPos);
+scene.add(sunLight);
+scene.add(new THREE.AmbientLight(0xffffff, 0.15));
 
-// ─── Stars (distant voxel background) ──────────────────────────────
-const starsGroup = new THREE.Group();
-scene.add(starsGroup);
-
-const starCount = 1000;
-const starRadius = 350; // far away
-const starSizeBase = 0.6;
-
+// ─── Stars ────────────────────────────────────────────────────────
+const starCount = 2500;
+const starInst = new THREE.InstancedMesh(voxelGeo, new THREE.MeshBasicMaterial({color: 0xffffff}), starCount);
 for (let i = 0; i < starCount; i++) {
-  // Random point on sphere
-  const theta = Math.random() * Math.PI * 2;
-  const phi = Math.acos(2 * Math.random() - 1);
-
-  let x = starRadius * Math.sin(phi) * Math.cos(theta);
-  let y = starRadius * Math.sin(phi) * Math.sin(theta);
-  let z = starRadius * Math.cos(phi);
-
-  // Small random offset to avoid perfect grid look
-  x += (Math.random() - 0.5) * 40;
-  y += (Math.random() - 0.5) * 40;
-  z += (Math.random() - 0.5) * 40;
-
-  // Slight color variation: white → slight yellow/blue
-  const temp = 0.85 + Math.random() * 0.3;
-  const color = new THREE.Color().setHSL(0.1, 0.1, temp);
-
-  // Random size variation
-  const size = starSizeBase * (0.4 + Math.random() * 0.6);
-
-  const star = createVoxel(x, y, z, color, size);
-  starsGroup.add(star);
+    const r = 7000 + Math.random() * 2000;
+    const theta = Math.random() * Math.PI * 2, phi = Math.acos(2 * Math.random() - 1);
+    dummy.position.set(r*Math.sin(phi)*Math.cos(theta)+sunPos.x, r*Math.sin(phi)*Math.sin(theta)+sunPos.y, r*Math.cos(phi)+sunPos.z);
+    dummy.scale.setScalar(2+Math.random()*3); dummy.updateMatrix(); starInst.setMatrixAt(i, dummy.matrix);
 }
+scene.add(starInst);
 
-// ─── Earth ─────────────────────────────────────────────────────────
-const earthGroup = new THREE.Group();
-scene.add(earthGroup);
-
-const earthRadius = 12;
-
-for (let x = -earthRadius; x <= earthRadius; x++) {
-  for (let y = -earthRadius; y <= earthRadius; y++) {
-    for (let z = -earthRadius; z <= earthRadius; z++) {
-      const dist = Math.hypot(x, y, z);
-      if (dist > earthRadius || dist < earthRadius - 1.4) continue;
-
-      let color = 0x000000;
-
-      const noise = Math.sin(x*0.9)*Math.sin(y*0.7)*Math.sin(z*0.8) +
-                    Math.sin(x*1.4 + y*1.1)*0.4;
-
-      if (dist > earthRadius - 0.5) {
-        if (noise > 0.15)      color = 0x3a7d3a;     // land
-        else if (noise > -0.1) color = 0x4a6fc4;     // shallow
-        else                   color = 0x1e3a8a;     // deep ocean
-      } else {
-        color = 0x2a4a2a;
-      }
-
-      if (Math.abs(y) > earthRadius * 0.75) {
-        color = 0xf0f8ff; // ice
-      }
-
-      earthGroup.add(createVoxel(x + 0.5, y + 0.5, z + 0.5, color));
+// ─── Moon / Satellite Helper ──────────────────────────────────────
+function createMoonSystem(parent, count, distBase, moonRadius, colorHex) {
+    const moons = [];
+    for(let i=0; i<count; i++) {
+        const pivot = new THREE.Group();
+        parent.add(pivot);
+        const moonMat = new THREE.MeshStandardMaterial({color: colorHex});
+        const mInst = new THREE.InstancedMesh(voxelGeo, moonMat, 64);
+        let mIdx = 0;
+        for(let x=-moonRadius; x<=moonRadius; x++)
+            for(let y=-moonRadius; y<=moonRadius; y++)
+                for(let z=-moonRadius; z<=moonRadius; z++)
+                    if(Math.hypot(x,y,z) <= moonRadius && mIdx < 64) {
+                        dummy.position.set(x,y,z); dummy.updateMatrix(); mInst.setMatrixAt(mIdx++, dummy.matrix);
+                    }
+        mInst.position.x = distBase + (i * 15);
+        pivot.add(mInst);
+        moons.push({ pivot, speed: 0.01 + Math.random() * 0.02 });
     }
-  }
+    return moons;
 }
 
-// ─── Moon ──────────────────────────────────────────────────────────
-const moonGroup = new THREE.Group();
-scene.add(moonGroup);
+// ─── Planet Factory ───────────────────────────────────────────────
+const planets = [];
+const moonAnims = [];
 
-const moonRadius = 5;
-const moonBaseOffset = 38 * 4;
+function createPlanet(radius, orbitDist, color, speed, isEarth=false, hasRings=false, moonCount=0) {
+    const orbitGroup = new THREE.Group();
+    orbitGroup.position.copy(sunPos);
+    scene.add(orbitGroup);
 
-for (let x = -moonRadius; x <= moonRadius; x++) {
-  for (let y = -moonRadius; y <= moonRadius; y++) {
-    for (let z = -moonRadius; z <= moonRadius; z++) {
-      const dist = Math.hypot(x, y, z);
-      if (dist > moonRadius || dist < moonRadius - 1.2) continue;
+    const planetContainer = new THREE.Group();
+    orbitGroup.add(planetContainer);
 
-      const craterNoise = Math.sin(x*2.3 + y*1.8 + z*2.1)*0.5 +
-                          Math.sin(x*3.7)*0.3;
+    let voxels = [];
+    for (let x=-radius; x<=radius; x++) 
+        for (let y=-radius; y<=radius; y++) 
+            for (let z=-radius; z<=radius; z++) {
+                const d = Math.hypot(x,y,z);
+                if (d <= radius && d > radius-1.8) voxels.push({x,y,z});
+            }
 
-      let gray = 0.60 + craterNoise * 0.15;
-      gray = Math.max(0.38, Math.min(0.92, gray));
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: isEarth, color: isEarth ? 0xffffff : color, flatShading: true });
+    const inst = new THREE.InstancedMesh(voxelGeo, mat, voxels.length);
+    
+    voxels.forEach((v, i) => {
+        dummy.position.set(v.x, v.y, v.z); dummy.updateMatrix(); inst.setMatrixAt(i, dummy.matrix);
+        if (isEarth) {
+            const noise = Math.sin(v.x*0.4)*Math.sin(v.y*0.3)*Math.sin(v.z*0.5);
+            if (Math.abs(v.y) > radius * 0.85) colorObj.setHex(0xffffff); // Ice caps
+            else if (noise > 0.1) colorObj.setHex(0x3a7d3a); // Continents
+            else colorObj.setHex(0x2244ff); // Oceans
+            inst.setColorAt(i, colorObj);
+        }
+    });
 
-      const color = new THREE.Color(gray, gray, gray + 0.02).getHex();
+    planetContainer.add(inst);
+    planetContainer.position.x = orbitDist;
 
-      const voxel = createVoxel(x + 0.5, y + 0.5, z + 0.5, color);
-      //voxel.position.add(new THREE.Vector3(moonBaseOffset, 6, -moonBaseOffset * 0.4));
-      moonGroup.add(voxel);
+    if (hasRings) {
+        let rv = [];
+        for (let x=-radius*2.2; x<=radius*2.2; x++) 
+            for (let z=-radius*2.2; z<=radius*2.2; z++) 
+                if (Math.hypot(x,z) > radius*1.4 && Math.hypot(x,z) < radius*2.1 && Math.random()>0.4) rv.push([x,0,z]);
+        const rInst = new THREE.InstancedMesh(voxelGeo, new THREE.MeshStandardMaterial({color: 0x998877, transparent:true, opacity:0.7}), rv.length);
+        rv.forEach((v,i) => { dummy.position.set(v[0],v[1],v[2]); dummy.updateMatrix(); rInst.setMatrixAt(i, dummy.matrix); });
+        planetContainer.add(rInst);
     }
-  }
+
+    if (moonCount > 0) {
+        const ms = createMoonSystem(planetContainer, moonCount, radius + 15, 2, 0xaaaaaa);
+        moonAnims.push(...ms);
+    }
+
+    const data = { orbitGroup, planetContainer, speed, angle: Math.random() * 6 };
+    planets.push(data);
+    return data;
 }
 
-// ─── Post-processing ──────────────────────────────────────────────
-const renderScene = new RenderPass(scene, camera);
+// ─── Build System ─────────────────────────────────────────────────
+createPlanet(6,  250,  0x8c8c8c, 0.015); 
+createPlanet(12, 450,  0xe3bb76, 0.012); 
+createPlanet(13, 750,  0x2244ff, 0.010, false, false, 1); // Earth + Moon
+createPlanet(9,  1100, 0xff4500, 0.008); 
+createPlanet(35, 1700, 0xd39c7e, 0.005, false, false, 4); // Jupiter + Galilean Moons
+createPlanet(30, 2300, 0xead6b8, 0.004, false, true, 3);  // Saturn + Moons
+createPlanet(20, 2800, 0xbbe1e4, 0.003); 
+createPlanet(20, 3200, 0x6081ff, 0.002);
 
-// Parameters: (resolution, strength, radius, threshold)
-const bloomPass = new UnrealBloomPass(
-  new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.3,  // Strength: How intense the glow is
-  0.4,  // Radius: How far the glow spreads
-  0.1   // Threshold: Min brightness needed to glow
-);
-
-const outputPass = new OutputPass();
-
+// ─── Rendering ────────────────────────────────────────────────────
 const composer = new EffectComposer(renderer);
-composer.addPass(renderScene);
-composer.addPass(bloomPass);
-composer.addPass(outputPass);
-
-// ─── Animation ─────────────────────────────────────────────────────
-let time = 0;
+composer.addPass(new RenderPass(scene, camera));
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.6, 0.3, 0.2));
+composer.addPass(new OutputPass());
 
 function animate() {
-  requestAnimationFrame(animate);
-
-  time += 0.003;
-
-  earthGroup.rotation.y += 0.0015;
-  //moonGroup.rotation.y += 0.002;
-
-  // Sun pulse
-  sunGroup.rotation.y += 0.001;
-  const sunPulse = 1 + Math.sin(time * 2) * 0.02;
-  sunGroup.scale.set(sunPulse, sunPulse, sunPulse);
-
-  // Moon orbit
-  const angle = time * 0.18;
-  moonGroup.position.x = Math.cos(angle) * moonBaseOffset;
-  moonGroup.position.z = Math.sin(angle) * moonBaseOffset * 0.7;
-  moonGroup.position.y = Math.sin(angle * 1.3) * 4;
-
-  controls.update();
-  //renderer.render(scene, camera);
-  // Use the composer instead of the renderer
-  composer.render();
+    requestAnimationFrame(animate);
+    planets.forEach(p => { p.angle += p.speed * 0.4; p.orbitGroup.rotation.y = p.angle; p.planetContainer.rotation.y += 0.005; });
+    moonAnims.forEach(m => { m.pivot.rotation.y += m.speed; m.pivot.rotation.x += 0.001; });
+    sunGroup.scale.setScalar(1 + Math.sin(Date.now()*0.002)*0.02);
+    controls.update();
+    composer.render();
 }
-
 animate();
 
-// ─── Resize ────────────────────────────────────────────────────────
 window.addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-  composer.setSize(innerWidth, innerHeight);
+    camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
 });
 </script>
 </body>
