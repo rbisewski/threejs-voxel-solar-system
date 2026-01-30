@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>High-Detail Voxel Solar System</title>
+  <title>High-Detail Voxel Solar System – with Line Orbits</title>
   <style>
     body { margin: 0; overflow: hidden; background: #000; }
     canvas { display: block; }
@@ -15,7 +15,7 @@
 </head>
 <body>
 
-<div id="info">Voxel Solar System • Dynamic Earth • Gas Giant Moons • Scroll to Zoom</div>
+<div id="info">Voxel Solar System • Smooth Line Orbits • Dynamic Earth • Gas Giant Moons • Scroll to Zoom</div>
 
 <script type="importmap">
 {
@@ -89,6 +89,31 @@ for (let i = 0; i < starCount; i++) {
 }
 scene.add(starInst);
 
+// ─── Orbit Line Helper ────────────────────────────────────────────
+function addOrbitLine(orbitGroup, radius, color = 0x3366ff, opacity = 0.35) {
+    const segments = 120;
+    const points = [];
+
+    for (let i = 0; i <= segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        const x = radius * Math.cos(angle);
+        const z = radius * Math.sin(angle);
+        points.push(new THREE.Vector3(x, 0, z));   // ← x & z swapped roles → lies in XZ plane
+    }
+
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+
+    const material = new THREE.LineBasicMaterial({
+        color: color,
+        transparent: true,
+        opacity: opacity,
+        linewidth: 1.4   // slight bump; still driver-limited in most cases
+    });
+
+    const line = new THREE.LineLoop(geometry, material);
+    orbitGroup.add(line);
+}
+
 // ─── Moon / Satellite Helper ──────────────────────────────────────
 function createMoonSystem(parent, count, distBase, moonRadius, colorHex) {
     const moons = [];
@@ -119,6 +144,9 @@ function createPlanet(radius, orbitDist, color, speed, isEarth=false, hasRings=f
     const orbitGroup = new THREE.Group();
     orbitGroup.position.copy(sunPos);
     scene.add(orbitGroup);
+
+    // Add smooth line orbit
+    addOrbitLine(orbitGroup, orbitDist, 0x3366ff, 0.025);
 
     const planetContainer = new THREE.Group();
     orbitGroup.add(planetContainer);
@@ -169,25 +197,32 @@ function createPlanet(radius, orbitDist, color, speed, isEarth=false, hasRings=f
 }
 
 // ─── Build System ─────────────────────────────────────────────────
-createPlanet(6,  250,  0x8c8c8c, 0.015); 
-createPlanet(12, 450,  0xe3bb76, 0.012); 
-createPlanet(13, 750,  0x2244ff, 0.010, false, false, 1); // Earth + Moon
-createPlanet(9,  1100, 0xff4500, 0.008); 
-createPlanet(35, 1700, 0xd39c7e, 0.005, false, false, 4); // Jupiter + Galilean Moons
-createPlanet(30, 2300, 0xead6b8, 0.004, false, true, 3);  // Saturn + Moons
-createPlanet(20, 2800, 0xbbe1e4, 0.003); 
-createPlanet(20, 3200, 0x6081ff, 0.002);
+createPlanet(6,  250,  0x8c8c8c, 0.015);     // Mercury
+createPlanet(12, 450,  0xe3bb76, 0.012);     // Venus
+createPlanet(13, 750,  0x2244ff, 0.010, false, false, 1);  // Earth + Moon
+createPlanet(9,  1100, 0xff4500, 0.008);     // Mars
+createPlanet(35, 1700, 0xd39c7e, 0.005, false, false, 4); // Jupiter + moons
+createPlanet(30, 2300, 0xead6b8, 0.004, false, true, 3);  // Saturn + moons + rings
+createPlanet(20, 2800, 0xbbe1e4, 0.003);     // Uranus
+createPlanet(20, 3200, 0x6081ff, 0.002);     // Neptune
 
 // ─── Rendering ────────────────────────────────────────────────────
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.6, 0.3, 0.2));
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.7, 0.4, 0.15)); // slightly boosted bloom for orbit glow
 composer.addPass(new OutputPass());
 
 function animate() {
     requestAnimationFrame(animate);
-    planets.forEach(p => { p.angle += p.speed * 0.4; p.orbitGroup.rotation.y = p.angle; p.planetContainer.rotation.y += 0.005; });
-    moonAnims.forEach(m => { m.pivot.rotation.y += m.speed; m.pivot.rotation.x += 0.001; });
+    planets.forEach(p => { 
+        p.angle += p.speed * 0.4; 
+        p.orbitGroup.rotation.y = p.angle; 
+        p.planetContainer.rotation.y += 0.005; 
+    });
+    moonAnims.forEach(m => { 
+        m.pivot.rotation.y += m.speed; 
+        m.pivot.rotation.x += 0.001; 
+    });
     sunGroup.scale.setScalar(1 + Math.sin(Date.now()*0.002)*0.02);
     controls.update();
     composer.render();
