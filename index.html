@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Voxel Solar System – Smooth Tracking & Zoom</title>
+  <title>Voxel Solar System – Complete Edition</title>
   <style>
     body { margin: 0; overflow: hidden; background: #000; }
     canvas { display: block; }
@@ -15,22 +15,23 @@
       position: absolute;
       color: #aaffff;
       font-family: Arial, Helvetica, sans-serif;
-      font-size: 14px;
+      font-size: 11px;
       font-weight: bold;
       text-shadow: 0 0 6px #000, 0 0 10px #000;
       white-space: nowrap;
       transform: translate(-50%, -120%);
-      background: rgba(0,0,20,0.5);
-      padding: 4px 10px;
-      border-radius: 6px;
-      border: 1px solid #4488ff;
+      background: rgba(0,0,20,0.4);
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid rgba(68, 136, 255, 0.5);
       pointer-events: none;
     }
+    .label.planet-label { font-size: 14px; padding: 4px 10px; border: 1px solid #4488ff; }
   </style>
 </head>
 <body>
 
-<div id="info">Voxel Solar System • Click a Planet to Track & Zoom • ESC to Orbit Sun</div>
+<div id="info">Voxel Solar System • Click to Track • ESC to Reset View</div>
 
 <script type="importmap">
 {
@@ -74,19 +75,13 @@ controls.enableDamping = true;
 
 const voxelGeo = new THREE.BoxGeometry(1, 1, 1);
 const dummy = new THREE.Object3D();
-const colorObj = new THREE.Color();
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 
 let hoveredObject = null;
 let selectedObject = null;
 
-const outlineMat = new THREE.MeshBasicMaterial({
-  color: 0x88ccff,
-  transparent: true,
-  opacity: 0.9,
-  side: THREE.BackSide
-});
+const outlineMat = new THREE.MeshBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.9, side: THREE.BackSide });
 
 // ─── Sun ──────────────────────────────────────────────────────────
 const sunPos = new THREE.Vector3(1500, 0, 100);
@@ -103,10 +98,7 @@ for (let x = -sunRadius; x <= sunRadius; x += 2)
             if (Math.hypot(x, y, z) <= sunRadius) sunVoxels.push([x, y, z]);
 
 const sunInst = new THREE.InstancedMesh(voxelGeo, sunMat, sunVoxels.length);
-sunVoxels.forEach((v, i) => { 
-    dummy.position.set(v[0], v[1], v[2]); dummy.updateMatrix(); 
-    sunInst.setMatrixAt(i, dummy.matrix); 
-});
+sunVoxels.forEach((v, i) => { dummy.position.set(v[0], v[1], v[2]); dummy.updateMatrix(); sunInst.setMatrixAt(i, dummy.matrix); });
 sunGroup.add(sunInst);
 
 const sunOutline = new THREE.Mesh(new THREE.SphereGeometry(sunRadius + 5, 24, 16), outlineMat);
@@ -114,13 +106,12 @@ sunOutline.visible = false;
 sunGroup.add(sunOutline);
 
 const sunLabelDiv = document.createElement('div');
-sunLabelDiv.className = 'label';
+sunLabelDiv.className = 'label planet-label';
 sunLabelDiv.textContent = 'Sun';
 const sunLabel = new CSS2DObject(sunLabelDiv);
 sunLabel.position.set(0, sunRadius + 22, 0);
 sunLabel.visible = false;
 sunGroup.add(sunLabel);
-
 sunGroup.userData = { outlineMesh: sunOutline, labelMesh: sunLabel, radius: sunRadius };
 
 const sunLight = new THREE.PointLight(0xffffff, 15, 12000, 0.6);
@@ -134,39 +125,71 @@ const starInst = new THREE.InstancedMesh(voxelGeo, new THREE.MeshBasicMaterial({
 for (let i = 0; i < starCount; i++) {
     const r = 10000 + Math.random() * 5000;
     const theta = Math.random() * Math.PI * 2, phi = Math.acos(2 * Math.random() - 1);
-    dummy.position.set(
-      r * Math.sin(phi) * Math.cos(theta) + sunPos.x,
-      r * Math.sin(phi) * Math.sin(theta) + sunPos.y,
-      r * Math.cos(phi) + sunPos.z
-    );
+    dummy.position.set(r * Math.sin(phi) * Math.cos(theta) + sunPos.x, r * Math.sin(phi) * Math.sin(theta) + sunPos.y, r * Math.cos(phi) + sunPos.z);
     dummy.scale.setScalar(2 + Math.random() * 4); dummy.updateMatrix(); 
     starInst.setMatrixAt(i, dummy.matrix);
 }
 scene.add(starInst);
 
 // ─── Moon Factory ────────────────────────────────────────────────
-function createMoons(parent, count, distBase, moonRadius) {
-    for (let i = 0; i < count; i++) {
+const moonAnims = [];
+function createMoons(parent, moonNames, planetRadius, moonScale = 1.0) {
+    moonNames.forEach((name, i) => {
         const pivot = new THREE.Group();
         parent.add(pivot);
-        const mMat = new THREE.MeshStandardMaterial({ color: 0x999999 });
-        const mInst = new THREE.InstancedMesh(voxelGeo, mMat, 32);
-        for(let j=0; j<32; j++) {
-            dummy.position.set(Math.random()*moonRadius, Math.random()*moonRadius, Math.random()*moonRadius);
+
+        const orbitDist = planetRadius + 18 + (i * 14);
+
+        // ─── Added: Moon Orbit Ring ───
+        const segments = 64;
+        const orbitPoints = [];
+        for (let j = 0; j <= segments; j++) {
+            const theta = (j / segments) * Math.PI * 2;
+            orbitPoints.push(new THREE.Vector3(orbitDist * Math.cos(theta), 0, orbitDist * Math.sin(theta)));
+        }
+        const orbitGeom = new THREE.BufferGeometry().setFromPoints(orbitPoints);
+        const orbitRing = new THREE.LineLoop(orbitGeom, new THREE.LineBasicMaterial({ 
+            color: 0x4488ff, 
+            transparent: true, 
+            opacity: 0.03 // Slightly higher opacity than planets as they are smaller
+        }));
+        // Add ring to the parent (the planet), not the pivot, so it doesn't rotate
+        parent.add(orbitRing); 
+        // ─────────────────────────────
+
+        const size = 1.5 * moonScale;
+        const mMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa });
+        const mInst = new THREE.InstancedMesh(voxelGeo, mMat, 16);
+        for(let j=0; j<16; j++) {
+            dummy.position.set(Math.random()*size, Math.random()*size, Math.random()*size);
             dummy.updateMatrix(); mInst.setMatrixAt(j, dummy.matrix);
         }
-        mInst.position.x = distBase + (i * 14) + 12;
+        
+        mInst.position.x = orbitDist;
         pivot.add(mInst);
-        moonAnims.push({ pivot, speed: 0.008 + Math.random() * 0.015 });
-    }
+
+        const moonLabelDiv = document.createElement('div');
+        moonLabelDiv.className = 'label';
+        moonLabelDiv.textContent = name;
+        const moonLabel = new CSS2DObject(moonLabelDiv);
+        moonLabel.position.set(0, size + 2, 0);
+        moonLabel.visible = false; 
+        mInst.add(moonLabel);
+
+        const moonPick = new THREE.Mesh(new THREE.SphereGeometry(size+3), new THREE.MeshBasicMaterial({visible: false}));
+        mInst.add(moonPick);
+
+        mInst.userData = { outlineMesh: new THREE.Group(), labelMesh: moonLabel, radius: size };
+        moonAnims.push({ pivot, speed: 0.005 + (0.01 / (i + 1)) });
+    });
 }
 
 // ─── Planet Factory ───────────────────────────────────────────────
 const planets = [];
 const clickableObjects = [];
-const moonAnims = [];
 
-function createPlanet(radius, orbitDist, color, speed, name, isEarth=false, hasRings=false, moonCount=0) {
+function createPlanet(radius, orbitDist, color, speed, name, isEarth=false, hasRings=false, moonNames=[], moonScale=1.0) {
+    // Restored Blue Orbit Rings
     const segments = 128;
     const orbitPoints = [];
     for (let i = 0; i <= segments; i++) {
@@ -197,36 +220,34 @@ function createPlanet(radius, orbitDist, color, speed, name, isEarth=false, hasR
     const mat = new THREE.MeshStandardMaterial({ vertexColors: isEarth, color: isEarth ? 0xffffff : color, flatShading: true });
     const inst = new THREE.InstancedMesh(voxelGeo, mat, voxels.length);
     voxels.forEach((v, i) => {
-        dummy.position.set(v.x, v.y, v.z); dummy.updateMatrix(); 
-        inst.setMatrixAt(i, dummy.matrix);
+        dummy.position.set(v.x, v.y, v.z); dummy.updateMatrix(); inst.setMatrixAt(i, dummy.matrix);
         if (isEarth) {
             const noise = Math.sin(v.x * 0.4) * Math.sin(v.y * 0.3);
-            colorObj.setHex(noise > 0.1 ? 0x3a7d3a : 0x2244ff);
-            inst.setColorAt(i, colorObj);
+            inst.setColorAt(i, new THREE.Color(noise > 0.1 ? 0x3a7d3a : 0x2244ff));
         }
     });
     planetContainer.add(inst);
 
     if (hasRings) {
-        const rMat = new THREE.MeshStandardMaterial({ color: 0x998877, transparent: true, opacity: 0.5 });
-        const rInst = new THREE.InstancedMesh(voxelGeo, rMat, 500);
-        for(let i=0; i<500; i++) {
+        const rMat = new THREE.MeshStandardMaterial({ color: 0x998877, transparent: true, opacity: 0.7 });
+        const rInst = new THREE.InstancedMesh(voxelGeo, rMat, 1500);
+        for(let i=0; i<1500; i++) {
             const ang = Math.random() * Math.PI * 2;
-            const dist = radius * 1.6 + Math.random() * radius;
-            dummy.position.set(Math.cos(ang)*dist, 0, Math.sin(ang)*dist);
+            const dist = radius * 1.5 + Math.random() * radius;
+            dummy.position.set(Math.cos(ang)*dist, (Math.random()-0.5)*0.5, Math.sin(ang)*dist);
             dummy.updateMatrix(); rInst.setMatrixAt(i, dummy.matrix);
         }
         planetContainer.add(rInst);
     }
 
-    if (moonCount > 0) createMoons(planetContainer, moonCount, radius, 2);
+    if (moonNames.length > 0) createMoons(planetContainer, moonNames, radius, moonScale);
 
     const outline = new THREE.Mesh(new THREE.SphereGeometry(radius + 4, 24, 16), outlineMat);
     outline.visible = false;
     planetContainer.add(outline);
 
     const labelDiv = document.createElement('div');
-    labelDiv.className = 'label';
+    labelDiv.className = 'label planet-label';
     labelDiv.textContent = name;
     const label = new CSS2DObject(labelDiv);
     label.position.set(0, radius + 15, 0);
@@ -237,7 +258,6 @@ function createPlanet(radius, orbitDist, color, speed, name, isEarth=false, hasR
     planetContainer.add(pickSphere);
 
     planetContainer.userData = { outlineMesh: outline, labelMesh: label, radius: radius };
-    
     planets.push({ orbitGroup, planetContainer, speed, angle: Math.random() * 10 });
     clickableObjects.push(planetContainer);
 }
@@ -245,63 +265,50 @@ function createPlanet(radius, orbitDist, color, speed, name, isEarth=false, hasR
 // ─── Build System ────────────────────────────────────────────────
 createPlanet(6,  250,  0x8c8c8c, 0.015, "Mercury");
 createPlanet(12, 450,  0xe3bb76, 0.012, "Venus");
-createPlanet(13, 750,  0x2244ff, 0.010, "Earth", false, false, 1);
-createPlanet(9,  1100, 0xff4500, 0.008, "Mars", false, false, 2);
-createPlanet(35, 1700, 0xd39c7e, 0.005, "Jupiter", false, false, 4);
-createPlanet(30, 2300, 0xead6b8, 0.004, "Saturn", false, true, 3);
-createPlanet(20, 2800, 0xbbe1e4, 0.003, "Uranus");
-createPlanet(20, 3200, 0x6081ff, 0.002, "Neptune");
+createPlanet(13, 750,  0x2244ff, 0.010, "Earth", false, false, ["Luna"]);
+createPlanet(9,  1100, 0xff4500, 0.008, "Mars", false, false, ["Phobos", "Deimos"], 0.5);
+createPlanet(35, 1700, 0xd39c7e, 0.005, "Jupiter", false, false, ["Io", "Europa", "Ganymede", "Callisto"]);
+createPlanet(30, 2300, 0xead6b8, 0.004, "Saturn", false, true, ["Titan", "Rhea", "Enceladus"]);
+createPlanet(20, 2800, 0xbbe1e4, 0.003, "Uranus", false, false, ["Titania", "Oberon"]);
+createPlanet(20, 3200, 0x6081ff, 0.002, "Neptune", false, false, ["Triton"]);
 
 clickableObjects.push(sunGroup);
 
-// ─── Interaction Logic (Updated) ───────────────────────────────────
-function onPointerMove(event) {
-    pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
-    pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+// ─── Interaction ──────────────────────────────────────────────────
+window.addEventListener('pointermove', (e) => {
+    pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+    pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
     raycaster.setFromCamera(pointer, camera);
-    const intersects = raycaster.intersectObjects(clickableObjects, true);
-
-    if (hoveredObject && (!intersects.length || getParent(intersects[0].object) !== hoveredObject)) {
-        hoveredObject.userData.outlineMesh.visible = false;
+    const intersects = raycaster.intersectObjects(scene.children, true);
+    if (hoveredObject) {
+        if(hoveredObject.userData.outlineMesh) hoveredObject.userData.outlineMesh.visible = false;
         hoveredObject.userData.labelMesh.visible = false;
         hoveredObject = null;
     }
-    if (intersects.length > 0) {
-        const target = getParent(intersects[0].object);
-        if (target) {
-            target.userData.outlineMesh.visible = true;
-            target.userData.labelMesh.visible = true;
-            hoveredObject = target;
-        }
+    const hit = intersects.find(i => getParent(i.object));
+    if (hit) {
+        hoveredObject = getParent(hit.object);
+        if(hoveredObject.userData.outlineMesh) hoveredObject.userData.outlineMesh.visible = true;
+        hoveredObject.userData.labelMesh.visible = true;
     }
-}
+});
 
 function getParent(obj) {
-    while (obj && !obj.userData.outlineMesh) obj = obj.parent;
+    while (obj && !obj.userData.labelMesh) obj = obj.parent;
     return obj;
 }
-
-window.addEventListener('pointermove', onPointerMove);
 
 window.addEventListener('click', () => { 
     if (hoveredObject) { 
         selectedObject = hoveredObject; 
         controls.enabled = false; 
-        // Set dynamic zoom based on planet size
-        const radius = selectedObject.userData.radius;
-        selectedObject.userData.zoomDistance = radius * 4.5;
+        selectedObject.userData.zoomDistance = (selectedObject.userData.radius || 10) * 4.5;
     } 
 });
 
-window.addEventListener('keydown', (e) => { 
-    if (e.key === 'Escape') { 
-        selectedObject = null; 
-        controls.enabled = true; 
-        controls.target.set(sunPos.x, sunPos.y, sunPos.z); 
-    } 
-});
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { selectedObject = null; controls.enabled = true; controls.target.set(sunPos.x, sunPos.y, sunPos.z); } });
 
-// ─── Animation Loop (Updated for Zoom/Track) ────────────────────────
+// ─── Animation Loop ───────────────────────────────────────────────
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.6, 0.4, 0.15));
@@ -311,22 +318,14 @@ function animate() {
     requestAnimationFrame(animate);
     planets.forEach(p => { p.angle += p.speed * 0.3; p.orbitGroup.rotation.y = p.angle; });
     moonAnims.forEach(m => { m.pivot.rotation.y += m.speed; });
-
     if (selectedObject) {
         const targetPos = new THREE.Vector3();
         selectedObject.getWorldPosition(targetPos);
-        
-        // 1. Smoothly interpolate the orbit controls focus point
         controls.target.lerp(targetPos, 0.1);
-
-        // 2. Smoothly move camera to a tracking position relative to the planet
-        const zoomDist = selectedObject.userData.zoomDistance || 100;
+        const zoomDist = selectedObject.userData.zoomDistance;
         const offset = new THREE.Vector3(zoomDist, zoomDist * 0.4, zoomDist);
-        const desiredPos = targetPos.clone().add(offset);
-        
-        camera.position.lerp(desiredPos, 0.05);
+        camera.position.lerp(targetPos.clone().add(offset), 0.05);
     }
-
     controls.update();
     composer.render();
     labelRenderer.render(scene, camera);
