@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>High-Detail Voxel Solar System – with Line Orbits</title>
+  <title>Voxel Solar System – Smooth Tracking & Zoom</title>
   <style>
     body { margin: 0; overflow: hidden; background: #000; }
     canvas { display: block; }
@@ -11,11 +11,26 @@
       color: #88f; font-family: Arial, sans-serif;
       pointer-events: none; user-select: none; z-index: 10;
     }
+    .label {
+      position: absolute;
+      color: #aaffff;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 14px;
+      font-weight: bold;
+      text-shadow: 0 0 6px #000, 0 0 10px #000;
+      white-space: nowrap;
+      transform: translate(-50%, -120%);
+      background: rgba(0,0,20,0.5);
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid #4488ff;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
 
-<div id="info">Voxel Solar System • Smooth Line Orbits • Dynamic Earth • Gas Giant Moons • Scroll to Zoom</div>
+<div id="info">Voxel Solar System • Click a Planet to Track & Zoom • ESC to Orbit Sun</div>
 
 <script type="importmap">
 {
@@ -33,26 +48,45 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
 // ─── Scene Setup ─────────────────────────────────────────────────
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000205);
 
-const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 1, 15000);
-camera.position.set(2800, 1500, 3200);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 40000);
+camera.position.set(4000, 2500, 4500);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(innerWidth, innerHeight);
+renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(window.devicePixelRatio);
 document.body.appendChild(renderer.domElement);
 
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(window.innerWidth, window.innerHeight);
+labelRenderer.domElement.style.position = 'absolute';
+labelRenderer.domElement.style.top = '0';
+labelRenderer.domElement.style.pointerEvents = 'none';
+document.body.appendChild(labelRenderer.domElement);
+
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.maxDistance = 12000;
 
 const voxelGeo = new THREE.BoxGeometry(1, 1, 1);
 const dummy = new THREE.Object3D();
 const colorObj = new THREE.Color();
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+
+let hoveredObject = null;
+let selectedObject = null;
+
+const outlineMat = new THREE.MeshBasicMaterial({
+  color: 0x88ccff,
+  transparent: true,
+  opacity: 0.9,
+  side: THREE.BackSide
+});
 
 // ─── Sun ──────────────────────────────────────────────────────────
 const sunPos = new THREE.Vector3(1500, 0, 100);
@@ -62,176 +96,247 @@ sunGroup.position.copy(sunPos);
 scene.add(sunGroup);
 
 const sunMat = new THREE.MeshStandardMaterial({ emissive: 0xffaa00, emissiveIntensity: 2.5, flatShading: true });
-
 let sunVoxels = [];
-for (let x=-sunRadius; x<=sunRadius; x+=2) 
-    for (let y=-sunRadius; y<=sunRadius; y+=2) 
-        for (let z=-sunRadius; z<=sunRadius; z+=2) 
-            if (Math.hypot(x,y,z) <= sunRadius) sunVoxels.push([x,y,z]);
+for (let x = -sunRadius; x <= sunRadius; x += 2) 
+    for (let y = -sunRadius; y <= sunRadius; y += 2) 
+        for (let z = -sunRadius; z <= sunRadius; z += 2) 
+            if (Math.hypot(x, y, z) <= sunRadius) sunVoxels.push([x, y, z]);
 
 const sunInst = new THREE.InstancedMesh(voxelGeo, sunMat, sunVoxels.length);
-sunVoxels.forEach((v, i) => { dummy.position.set(v[0], v[1], v[2]); dummy.updateMatrix(); sunInst.setMatrixAt(i, dummy.matrix); });
+sunVoxels.forEach((v, i) => { 
+    dummy.position.set(v[0], v[1], v[2]); dummy.updateMatrix(); 
+    sunInst.setMatrixAt(i, dummy.matrix); 
+});
 sunGroup.add(sunInst);
 
-const sunLight = new THREE.PointLight(0xffffff, 15, 10000, 0.6);
+const sunOutline = new THREE.Mesh(new THREE.SphereGeometry(sunRadius + 5, 24, 16), outlineMat);
+sunOutline.visible = false;
+sunGroup.add(sunOutline);
+
+const sunLabelDiv = document.createElement('div');
+sunLabelDiv.className = 'label';
+sunLabelDiv.textContent = 'Sun';
+const sunLabel = new CSS2DObject(sunLabelDiv);
+sunLabel.position.set(0, sunRadius + 22, 0);
+sunLabel.visible = false;
+sunGroup.add(sunLabel);
+
+sunGroup.userData = { outlineMesh: sunOutline, labelMesh: sunLabel, radius: sunRadius };
+
+const sunLight = new THREE.PointLight(0xffffff, 15, 12000, 0.6);
 sunLight.position.copy(sunPos);
 scene.add(sunLight);
-scene.add(new THREE.AmbientLight(0xffffff, 0.15));
+scene.add(new THREE.AmbientLight(0xffffff, 0.2));
 
 // ─── Stars ────────────────────────────────────────────────────────
-const starCount = 2500;
+const starCount = 3500;
 const starInst = new THREE.InstancedMesh(voxelGeo, new THREE.MeshBasicMaterial({color: 0xffffff}), starCount);
 for (let i = 0; i < starCount; i++) {
-    const r = 7000 + Math.random() * 2000;
+    const r = 10000 + Math.random() * 5000;
     const theta = Math.random() * Math.PI * 2, phi = Math.acos(2 * Math.random() - 1);
-    dummy.position.set(r*Math.sin(phi)*Math.cos(theta)+sunPos.x, r*Math.sin(phi)*Math.sin(theta)+sunPos.y, r*Math.cos(phi)+sunPos.z);
-    dummy.scale.setScalar(2+Math.random()*3); dummy.updateMatrix(); starInst.setMatrixAt(i, dummy.matrix);
+    dummy.position.set(
+      r * Math.sin(phi) * Math.cos(theta) + sunPos.x,
+      r * Math.sin(phi) * Math.sin(theta) + sunPos.y,
+      r * Math.cos(phi) + sunPos.z
+    );
+    dummy.scale.setScalar(2 + Math.random() * 4); dummy.updateMatrix(); 
+    starInst.setMatrixAt(i, dummy.matrix);
 }
 scene.add(starInst);
 
-// ─── Orbit Line Helper ────────────────────────────────────────────
-function addOrbitLine(orbitGroup, radius, color = 0x3366ff, opacity = 0.35) {
-    const segments = 120;
-    const points = [];
-
-    for (let i = 0; i <= segments; i++) {
-        const angle = (i / segments) * Math.PI * 2;
-        const x = radius * Math.cos(angle);
-        const z = radius * Math.sin(angle);
-        points.push(new THREE.Vector3(x, 0, z));   // ← x & z swapped roles → lies in XZ plane
-    }
-
-    const geometry = new THREE.BufferGeometry().setFromPoints(points);
-
-    const material = new THREE.LineBasicMaterial({
-        color: color,
-        transparent: true,
-        opacity: opacity,
-        linewidth: 1.4   // slight bump; still driver-limited in most cases
-    });
-
-    const line = new THREE.LineLoop(geometry, material);
-    orbitGroup.add(line);
-}
-
-// ─── Moon / Satellite Helper ──────────────────────────────────────
-function createMoonSystem(parent, count, distBase, moonRadius, colorHex) {
-    const moons = [];
-    for(let i=0; i<count; i++) {
+// ─── Moon Factory ────────────────────────────────────────────────
+function createMoons(parent, count, distBase, moonRadius) {
+    for (let i = 0; i < count; i++) {
         const pivot = new THREE.Group();
         parent.add(pivot);
-        const moonMat = new THREE.MeshStandardMaterial({color: colorHex});
-        const mInst = new THREE.InstancedMesh(voxelGeo, moonMat, 64);
-        let mIdx = 0;
-        for(let x=-moonRadius; x<=moonRadius; x++)
-            for(let y=-moonRadius; y<=moonRadius; y++)
-                for(let z=-moonRadius; z<=moonRadius; z++)
-                    if(Math.hypot(x,y,z) <= moonRadius && mIdx < 64) {
-                        dummy.position.set(x,y,z); dummy.updateMatrix(); mInst.setMatrixAt(mIdx++, dummy.matrix);
-                    }
-        mInst.position.x = distBase + (i * 15);
+        const mMat = new THREE.MeshStandardMaterial({ color: 0x999999 });
+        const mInst = new THREE.InstancedMesh(voxelGeo, mMat, 32);
+        for(let j=0; j<32; j++) {
+            dummy.position.set(Math.random()*moonRadius, Math.random()*moonRadius, Math.random()*moonRadius);
+            dummy.updateMatrix(); mInst.setMatrixAt(j, dummy.matrix);
+        }
+        mInst.position.x = distBase + (i * 14) + 12;
         pivot.add(mInst);
-        moons.push({ pivot, speed: 0.01 + Math.random() * 0.02 });
+        moonAnims.push({ pivot, speed: 0.008 + Math.random() * 0.015 });
     }
-    return moons;
 }
 
 // ─── Planet Factory ───────────────────────────────────────────────
 const planets = [];
+const clickableObjects = [];
 const moonAnims = [];
 
-function createPlanet(radius, orbitDist, color, speed, isEarth=false, hasRings=false, moonCount=0) {
+function createPlanet(radius, orbitDist, color, speed, name, isEarth=false, hasRings=false, moonCount=0) {
+    const segments = 128;
+    const orbitPoints = [];
+    for (let i = 0; i <= segments; i++) {
+        const theta = (i / segments) * Math.PI * 2;
+        orbitPoints.push(new THREE.Vector3(orbitDist * Math.cos(theta), 0, orbitDist * Math.sin(theta)));
+    }
+    const orbitGeom = new THREE.BufferGeometry().setFromPoints(orbitPoints);
+    const orbitRing = new THREE.LineLoop(orbitGeom, new THREE.LineBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.03 }));
+    const staticOrbit = new THREE.Group();
+    staticOrbit.position.copy(sunPos);
+    staticOrbit.add(orbitRing);
+    scene.add(staticOrbit);
+
     const orbitGroup = new THREE.Group();
     orbitGroup.position.copy(sunPos);
     scene.add(orbitGroup);
 
-    // Add smooth line orbit
-    addOrbitLine(orbitGroup, orbitDist, 0x3366ff, 0.025);
-
     const planetContainer = new THREE.Group();
+    planetContainer.position.x = orbitDist;
     orbitGroup.add(planetContainer);
 
-    let voxels = [];
-    for (let x=-radius; x<=radius; x++) 
-        for (let y=-radius; y<=radius; y++) 
-            for (let z=-radius; z<=radius; z++) {
-                const d = Math.hypot(x,y,z);
-                if (d <= radius && d > radius-1.8) voxels.push({x,y,z});
-            }
+    const voxels = [];
+    for (let x = -radius; x <= radius; x++) 
+        for (let y = -radius; y <= radius; y++) 
+            for (let z = -radius; z <= radius; z++) 
+                if (Math.hypot(x, y, z) <= radius) voxels.push({x,y,z});
 
     const mat = new THREE.MeshStandardMaterial({ vertexColors: isEarth, color: isEarth ? 0xffffff : color, flatShading: true });
     const inst = new THREE.InstancedMesh(voxelGeo, mat, voxels.length);
-    
     voxels.forEach((v, i) => {
-        dummy.position.set(v.x, v.y, v.z); dummy.updateMatrix(); inst.setMatrixAt(i, dummy.matrix);
+        dummy.position.set(v.x, v.y, v.z); dummy.updateMatrix(); 
+        inst.setMatrixAt(i, dummy.matrix);
         if (isEarth) {
-            const noise = Math.sin(v.x*0.4)*Math.sin(v.y*0.3)*Math.sin(v.z*0.5);
-            if (Math.abs(v.y) > radius * 0.85) colorObj.setHex(0xffffff); // Ice caps
-            else if (noise > 0.1) colorObj.setHex(0x3a7d3a); // Continents
-            else colorObj.setHex(0x2244ff); // Oceans
+            const noise = Math.sin(v.x * 0.4) * Math.sin(v.y * 0.3);
+            colorObj.setHex(noise > 0.1 ? 0x3a7d3a : 0x2244ff);
             inst.setColorAt(i, colorObj);
         }
     });
-
     planetContainer.add(inst);
-    planetContainer.position.x = orbitDist;
 
     if (hasRings) {
-        let rv = [];
-        for (let x=-radius*2.2; x<=radius*2.2; x++) 
-            for (let z=-radius*2.2; z<=radius*2.2; z++) 
-                if (Math.hypot(x,z) > radius*1.4 && Math.hypot(x,z) < radius*2.1 && Math.random()>0.4) rv.push([x,0,z]);
-        const rInst = new THREE.InstancedMesh(voxelGeo, new THREE.MeshStandardMaterial({color: 0x998877, transparent:true, opacity:0.7}), rv.length);
-        rv.forEach((v,i) => { dummy.position.set(v[0],v[1],v[2]); dummy.updateMatrix(); rInst.setMatrixAt(i, dummy.matrix); });
+        const rMat = new THREE.MeshStandardMaterial({ color: 0x998877, transparent: true, opacity: 0.5 });
+        const rInst = new THREE.InstancedMesh(voxelGeo, rMat, 500);
+        for(let i=0; i<500; i++) {
+            const ang = Math.random() * Math.PI * 2;
+            const dist = radius * 1.6 + Math.random() * radius;
+            dummy.position.set(Math.cos(ang)*dist, 0, Math.sin(ang)*dist);
+            dummy.updateMatrix(); rInst.setMatrixAt(i, dummy.matrix);
+        }
         planetContainer.add(rInst);
     }
 
-    if (moonCount > 0) {
-        const ms = createMoonSystem(planetContainer, moonCount, radius + 15, 2, 0xaaaaaa);
-        moonAnims.push(...ms);
-    }
+    if (moonCount > 0) createMoons(planetContainer, moonCount, radius, 2);
 
-    const data = { orbitGroup, planetContainer, speed, angle: Math.random() * 6 };
-    planets.push(data);
-    return data;
+    const outline = new THREE.Mesh(new THREE.SphereGeometry(radius + 4, 24, 16), outlineMat);
+    outline.visible = false;
+    planetContainer.add(outline);
+
+    const labelDiv = document.createElement('div');
+    labelDiv.className = 'label';
+    labelDiv.textContent = name;
+    const label = new CSS2DObject(labelDiv);
+    label.position.set(0, radius + 15, 0);
+    label.visible = false;
+    planetContainer.add(label);
+
+    const pickSphere = new THREE.Mesh(new THREE.SphereGeometry(radius + 3, 16, 12), new THREE.MeshBasicMaterial({ visible: false }));
+    planetContainer.add(pickSphere);
+
+    planetContainer.userData = { outlineMesh: outline, labelMesh: label, radius: radius };
+    
+    planets.push({ orbitGroup, planetContainer, speed, angle: Math.random() * 10 });
+    clickableObjects.push(planetContainer);
 }
 
-// ─── Build System ─────────────────────────────────────────────────
-createPlanet(6,  250,  0x8c8c8c, 0.015);     // Mercury
-createPlanet(12, 450,  0xe3bb76, 0.012);     // Venus
-createPlanet(13, 750,  0x2244ff, 0.010, false, false, 1);  // Earth + Moon
-createPlanet(9,  1100, 0xff4500, 0.008);     // Mars
-createPlanet(35, 1700, 0xd39c7e, 0.005, false, false, 4); // Jupiter + moons
-createPlanet(30, 2300, 0xead6b8, 0.004, false, true, 3);  // Saturn + moons + rings
-createPlanet(20, 2800, 0xbbe1e4, 0.003);     // Uranus
-createPlanet(20, 3200, 0x6081ff, 0.002);     // Neptune
+// ─── Build System ────────────────────────────────────────────────
+createPlanet(6,  250,  0x8c8c8c, 0.015, "Mercury");
+createPlanet(12, 450,  0xe3bb76, 0.012, "Venus");
+createPlanet(13, 750,  0x2244ff, 0.010, "Earth", false, false, 1);
+createPlanet(9,  1100, 0xff4500, 0.008, "Mars", false, false, 2);
+createPlanet(35, 1700, 0xd39c7e, 0.005, "Jupiter", false, false, 4);
+createPlanet(30, 2300, 0xead6b8, 0.004, "Saturn", false, true, 3);
+createPlanet(20, 2800, 0xbbe1e4, 0.003, "Uranus");
+createPlanet(20, 3200, 0x6081ff, 0.002, "Neptune");
 
-// ─── Rendering ────────────────────────────────────────────────────
+clickableObjects.push(sunGroup);
+
+// ─── Interaction Logic (Updated) ───────────────────────────────────
+function onPointerMove(event) {
+    pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+    pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const intersects = raycaster.intersectObjects(clickableObjects, true);
+
+    if (hoveredObject && (!intersects.length || getParent(intersects[0].object) !== hoveredObject)) {
+        hoveredObject.userData.outlineMesh.visible = false;
+        hoveredObject.userData.labelMesh.visible = false;
+        hoveredObject = null;
+    }
+    if (intersects.length > 0) {
+        const target = getParent(intersects[0].object);
+        if (target) {
+            target.userData.outlineMesh.visible = true;
+            target.userData.labelMesh.visible = true;
+            hoveredObject = target;
+        }
+    }
+}
+
+function getParent(obj) {
+    while (obj && !obj.userData.outlineMesh) obj = obj.parent;
+    return obj;
+}
+
+window.addEventListener('pointermove', onPointerMove);
+
+window.addEventListener('click', () => { 
+    if (hoveredObject) { 
+        selectedObject = hoveredObject; 
+        controls.enabled = false; 
+        // Set dynamic zoom based on planet size
+        const radius = selectedObject.userData.radius;
+        selectedObject.userData.zoomDistance = radius * 4.5;
+    } 
+});
+
+window.addEventListener('keydown', (e) => { 
+    if (e.key === 'Escape') { 
+        selectedObject = null; 
+        controls.enabled = true; 
+        controls.target.set(sunPos.x, sunPos.y, sunPos.z); 
+    } 
+});
+
+// ─── Animation Loop (Updated for Zoom/Track) ────────────────────────
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.7, 0.4, 0.15)); // slightly boosted bloom for orbit glow
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.6, 0.4, 0.15));
 composer.addPass(new OutputPass());
 
 function animate() {
     requestAnimationFrame(animate);
-    planets.forEach(p => { 
-        p.angle += p.speed * 0.4; 
-        p.orbitGroup.rotation.y = p.angle; 
-        p.planetContainer.rotation.y += 0.005; 
-    });
-    moonAnims.forEach(m => { 
-        m.pivot.rotation.y += m.speed; 
-        m.pivot.rotation.x += 0.001; 
-    });
-    sunGroup.scale.setScalar(1 + Math.sin(Date.now()*0.002)*0.02);
+    planets.forEach(p => { p.angle += p.speed * 0.3; p.orbitGroup.rotation.y = p.angle; });
+    moonAnims.forEach(m => { m.pivot.rotation.y += m.speed; });
+
+    if (selectedObject) {
+        const targetPos = new THREE.Vector3();
+        selectedObject.getWorldPosition(targetPos);
+        
+        // 1. Smoothly interpolate the orbit controls focus point
+        controls.target.lerp(targetPos, 0.1);
+
+        // 2. Smoothly move camera to a tracking position relative to the planet
+        const zoomDist = selectedObject.userData.zoomDistance || 100;
+        const offset = new THREE.Vector3(zoomDist, zoomDist * 0.4, zoomDist);
+        const desiredPos = targetPos.clone().add(offset);
+        
+        camera.position.lerp(desiredPos, 0.05);
+    }
+
     controls.update();
     composer.render();
+    labelRenderer.render(scene, camera);
 }
 animate();
 
 window.addEventListener('resize', () => {
-    camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
-    renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
+    camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight); labelRenderer.setSize(window.innerWidth, window.innerHeight);
+    composer.setSize(window.innerWidth, window.innerHeight);
 });
 </script>
 </body>
