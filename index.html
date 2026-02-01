@@ -114,10 +114,10 @@ sunLabel.visible = false;
 sunGroup.add(sunLabel);
 sunGroup.userData = { outlineMesh: sunOutline, labelMesh: sunLabel, radius: sunRadius };
 
-const sunLight = new THREE.PointLight(0xffffff, 15, 12000, 0.6);
+const sunLight = new THREE.PointLight(0xffffff, 45, 12000, 0.6);
 sunLight.position.copy(sunPos);
 scene.add(sunLight);
-scene.add(new THREE.AmbientLight(0xffffff, 0.2));
+scene.add(new THREE.AmbientLight(0xffffff, 0.05));
 
 // ─── Stars ────────────────────────────────────────────────────────
 const starCount = 3500;
