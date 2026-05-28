@@ -120,10 +120,10 @@ scene.add(sunLight);
 scene.add(new THREE.AmbientLight(0xffffff, 0.05));
 
 // ─── Stars ────────────────────────────────────────────────────────
-const starCount = 3500;
+const starCount = 7000;
 const starInst = new THREE.InstancedMesh(voxelGeo, new THREE.MeshBasicMaterial({color: 0xffffff}), starCount);
 for (let i = 0; i < starCount; i++) {
-    const r = 10000 + Math.random() * 5000;
+    const r = 10000 + Math.random() * 50000;
     const theta = Math.random() * Math.PI * 2, phi = Math.acos(2 * Math.random() - 1);
     dummy.position.set(r * Math.sin(phi) * Math.cos(theta) + sunPos.x, r * Math.sin(phi) * Math.sin(theta) + sunPos.y, r * Math.cos(phi) + sunPos.z);
     dummy.scale.setScalar(2 + Math.random() * 4); dummy.updateMatrix(); 
@@ -263,14 +263,14 @@ function createPlanet(radius, orbitDist, color, speed, name, isEarth=false, hasR
 }
 
 // ─── Build System ────────────────────────────────────────────────
-createPlanet(6,  250,  0x8c8c8c, 0.015, "Mercury");
-createPlanet(12, 450,  0xe3bb76, 0.012, "Venus");
-createPlanet(13, 750,  0x2244ff, 0.010, "Earth", false, false, ["Luna"]);
-createPlanet(9,  1100, 0xff4500, 0.008, "Mars", false, false, ["Phobos", "Deimos"], 0.5);
-createPlanet(35, 1700, 0xd39c7e, 0.005, "Jupiter", false, false, ["Io", "Europa", "Ganymede", "Callisto"]);
-createPlanet(30, 2300, 0xead6b8, 0.004, "Saturn", false, true, ["Titan", "Rhea", "Enceladus"]);
-createPlanet(20, 2800, 0xbbe1e4, 0.003, "Uranus", false, false, ["Titania", "Oberon"]);
-createPlanet(20, 3200, 0x6081ff, 0.002, "Neptune", false, false, ["Triton"]);
+createPlanet(6,    387,  0x8c8c8c, 0.015, "Mercury");
+createPlanet(12,   723,  0xe3bb76, 0.012, "Venus");
+createPlanet(13,  1000,  0x2244ff, 0.010, "Earth", false, false, ["Luna"]);
+createPlanet(9,   1523,  0xff4500, 0.008, "Mars", false, false, ["Phobos", "Deimos"], 0.5);
+createPlanet(35,  5203,  0xd39c7e, 0.005, "Jupiter", false, false, ["Io", "Europa", "Ganymede", "Callisto"]);
+createPlanet(30,  9582,  0xead6b8, 0.004, "Saturn", false, true, ["Titan", "Rhea", "Enceladus"]);
+createPlanet(20, 19191,  0xbbe1e4, 0.003, "Uranus", false, false, ["Titania", "Oberon"]);
+createPlanet(20, 30070,  0x6081ff, 0.002, "Neptune", false, false, ["Triton"]);
 
 clickableObjects.push(sunGroup);
 
